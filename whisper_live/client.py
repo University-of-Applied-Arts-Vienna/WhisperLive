@@ -43,6 +43,7 @@ class Client:
         translation_srt_file_path="output_translated.srt",
         enable_timestamps=False,
         display_segments=4,
+        word_timestamps=False,
     ):
         """
         Initializes a Client instance for audio recording and streaming to a server.
@@ -101,6 +102,8 @@ class Client:
             self.task = "translate"
         self.enable_timestamps = enable_timestamps
         self.display_segments = display_segments
+
+        self.word_timestamps = word_timestamps
 
         self.audio_bytes = None
 
@@ -299,6 +302,7 @@ class Client:
                     "same_output_threshold": self.same_output_threshold,
                     "enable_translation": self.enable_translation,
                     "target_language": self.target_language,
+                    "word_timestamps": self.word_timestamps,
                 }
             )
         )
@@ -820,6 +824,7 @@ class TranscriptionClient(TranscriptionTeeClient):
         translation_srt_file_path="./output_translated.srt",
         enable_timestamps=False,
         display_segments=4,
+        word_timestamps=False,
     ):
         self.client = Client(
             host,
@@ -842,6 +847,7 @@ class TranscriptionClient(TranscriptionTeeClient):
             translation_srt_file_path=translation_srt_file_path,
             enable_timestamps=enable_timestamps,
             display_segments=display_segments,
+            word_timestamps=word_timestamps,
         )
 
         if save_output_recording and not output_recording_filename.endswith(".wav"):
