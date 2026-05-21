@@ -379,11 +379,20 @@ class ServeClientBase(object):
             if not self.text or self.text[-1].strip().lower() != self.current_out.strip().lower():
                 self.text.append(self.current_out)
                 with self.lock:
+                    # Promote the live tail by repetition. Capture word-level
+                    # timestamps from segments[-1] — current_out was built from
+                    # exactly that segment's text — so the resulting completed
+                    # segment carries the same per-word confidences as paths
+                    # above. Without this, long sentences that stabilize via
+                    # repetition (instead of being shoved out by a successor)
+                    # arrive at the client with no `words` array.
+                    words = self._extract_words(segments[-1], self.timestamp_offset)
                     completed_segment = self.format_segment(
                         self.timestamp_offset,
                         self.timestamp_offset + min(duration, self.end_time_for_same_output),
                         self.current_out,
-                        completed=True
+                        completed=True,
+                        words=words,
                     )
                     self.transcript.append(completed_segment)
 
