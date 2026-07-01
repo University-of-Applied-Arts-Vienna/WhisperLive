@@ -1,4 +1,5 @@
 import os
+import gc
 import json
 import logging
 import threading
@@ -259,3 +260,37 @@ class ServeClientFasterWhisper(ServeClientBase):
 
         if len(segments):
             self.send_transcription_to_client(segments)
+
+    def cleanup(self):
+        """
+        Release the per-client model on disconnect so its GPU memory is reclaimed.
+
+        WhisperLive loads a WhisperModel per client (unless single-model mode is
+        active). Without an explicit release, CTranslate2's CUDA memory lingers and
+        accumulates across connections until a fresh model load fails with a
+        misleading "out of memory" error. Here we signal the transcription thread to
+        stop, wait for it, then drop the model reference and clear the CUDA cache.
+        The shared SINGLE_MODEL (single-model / batch mode) is never freed.
+        """
+        super().cleanup()  # sets self.exit = True, signalling the transcription thread
+
+        thread = getattr(self, "trans_thread", None)
+        if thread is not None and thread is not threading.current_thread() and thread.is_alive():
+            thread.join(timeout=5.0)
+        # If the thread is still running (e.g. stuck mid-transcribe), leave the model
+        # in place rather than freeing something still in use.
+        if thread is not None and thread.is_alive():
+            return
+
+        transcriber = getattr(self, "transcriber", None)
+        if transcriber is None or transcriber is ServeClientFasterWhisper.SINGLE_MODEL:
+            return
+        self.transcriber = None
+        del transcriber
+        gc.collect()
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception as e:
+            logging.debug(f"empty_cache failed during cleanup: {e}")
+        logging.info("Released per-client Whisper model and cleared CUDA cache.")
