@@ -96,6 +96,13 @@ class ServeClientBase(object):
                 input_sample = input_bytes.copy()
                 result = self.transcribe_audio(input_sample)
 
+                # The client may have disconnected while this (possibly long)
+                # inference ran. Don't try to send to a closed socket or start
+                # another pass over the stale buffer -- stop right away.
+                if self.exit:
+                    logging.info("Exiting speech to text thread")
+                    break
+
                 if result is None or self.language is None:
                     self.timestamp_offset += duration
                     time.sleep(0.25)    # wait for voice activity, result is None when no voice activity

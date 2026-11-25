@@ -16,6 +16,7 @@ class ServeClientFasterWhisper(ServeClientBase):
     SINGLE_MODEL = None
     SINGLE_MODEL_LOCK = threading.Lock()
     BATCH_WORKER = None
+    _RELEASE_LOCK = threading.Lock()  # guards per-client model release (cleanup vs. exiting thread)
 
     def __init__(
         self,
@@ -277,15 +278,29 @@ class ServeClientFasterWhisper(ServeClientBase):
         thread = getattr(self, "trans_thread", None)
         if thread is not None and thread is not threading.current_thread() and thread.is_alive():
             thread.join(timeout=5.0)
-        # If the thread is still running (e.g. stuck mid-transcribe), leave the model
-        # in place rather than freeing something still in use.
+        # If the thread is still running (e.g. mid-transcribe on a long buffer), don't
+        # free a model that is in use -- the thread releases it itself when it exits
+        # (see speech_to_text). Previously the model was simply never freed here.
         if thread is not None and thread.is_alive():
+            logging.info("Transcription thread still busy; model is released when it exits.")
             return
+        self._release_model()
 
-        transcriber = getattr(self, "transcriber", None)
-        if transcriber is None or transcriber is ServeClientFasterWhisper.SINGLE_MODEL:
-            return
-        self.transcriber = None
+    def speech_to_text(self):
+        try:
+            super().speech_to_text()
+        finally:
+            if self.exit:
+                self._release_model()
+
+    def _release_model(self):
+        """Drop the per-client model and clear the CUDA cache. Idempotent; may be
+        called from cleanup() or from the exiting transcription thread."""
+        with ServeClientFasterWhisper._RELEASE_LOCK:
+            transcriber = getattr(self, "transcriber", None)
+            if transcriber is None or transcriber is ServeClientFasterWhisper.SINGLE_MODEL:
+                return
+            self.transcriber = None
         del transcriber
         gc.collect()
         try:
